@@ -1,0 +1,280 @@
+%%% -------------------------------------------------------------------
+%%% Author  : uabjle
+%%% Description : 
+%%% ToDo 
+%%% 1. New cluster
+%%% 2. Check existing cluster -> restart missing node vms
+%%%
+%%% Created : 10 dec 2012
+%%% -------------------------------------------------------------------
+-module(pod).    
+   
+%% --------------------------------------------------------------------
+%% Include files
+%% --------------------------------------------------------------------
+-include("kube_logger.hrl").
+%%---------------------------------------------------------------------
+%% Records & defintions
+%%---------------------------------------------------------------------
+%missing clusters
+%running clusters
+
+%% --------------------------------------------------------------------
+
+-export([create_node/7,    %Ip,SshPort,UId,Pwd,HostId,NodeName,Cookie,OtherArgs
+	 delete_node/1,
+	 delete_node/2,
+	 create_slave/4, %HostNode,HostId,SlaveName,ErlArgs
+	 create_slave/5,    %HostNode,HostId,SlaveName,PodDir,ErlArgs
+	 delete_slave/3, %(HostNode,PodNode,PodDir)
+	 delete_slave/2 %(HostNode,PodNode)
+	]).
+
+-export([
+	 load/4,
+	 start/2,
+	 load_start/2,
+	 load_start/3
+	 
+	]).
+
+
+%% ====================================================================
+%% External functions
+%% ====================================================================  
+%% --------------------------------------------------------------------
+%% Function:start/0 
+%% Description: Creates a slave node via HostNode 
+%% NodeName=pod_microseconds_clusterId_HostId
+%% PodDir=clusterId/pod_microseconds
+%% AppDir=PodDir/AppId
+%% AppPa=AppDir/ebin
+%% Returns: non
+%% --------------------------------------------------------------------
+load(WantedPodSpec,HostNode,PodNode,PodDir)->
+    AppId=db_pod_spec:app_id(WantedPodSpec),
+    LoadedApps=rpc:call(PodNode,application,loaded_applications,[],25*1000),
+   % ?PrintLog(debug,"LoadedApps ",[LoadedApps,PodNode,?FUNCTION_NAME,?MODULE,?LINE]),
+    Result=case lists:keymember(list_to_atom(AppId),1,LoadedApps) of
+	       true->
+		   ?PrintLog(log,'Already loaded',[WantedPodSpec,AppId,PodNode,?FUNCTION_NAME,?MODULE,?LINE]),
+		   {error,['Already loaded',AppId,PodNode]};
+	       false ->
+		   GitPath=db_pod_spec:git_path(WantedPodSpec),
+		   AppDir=filename:join(PodDir,AppId),
+		   AppEbin=filename:join(AppDir,"ebin"),
+		   App=list_to_atom(AppId),
+		   rpc:call(HostNode,os,cmd,["rm -rf "++AppId],25*1000),
+		   GitResult=rpc:call(HostNode,os,cmd,["git clone "++GitPath],25*1000),
+	%	   ?PrintLog(log,"GitResult",[PodNode,GitPath,GitResult,?FUNCTION_NAME,?MODULE,?LINE]),
+		   MVResult=rpc:call(HostNode,os,cmd,["mv "++AppId++" "++AppDir],25*1000),
+	%	   ?PrintLog(log,"MVResult",[AppId,AppDir,MVResult,?FUNCTION_NAME,?MODULE,?LINE]),
+		   true=rpc:call(PodNode,code,add_patha,[AppEbin],22*1000),
+		   AppEnv=db_pod_spec:app_env(WantedPodSpec),
+		   ok=rpc:call(PodNode,application,set_env,[[{App,AppEnv}]]),		       
+		   {ok,[]}
+	   end,
+    Result.
+
+start(PodNode,WantedPodSpec)->
+    App=list_to_atom(db_pod_spec:app_id(WantedPodSpec)),
+    ?PrintLog(debug,"App,PodNode,WantedPodSpec",[App,PodNode,WantedPodSpec,?FUNCTION_NAME,?MODULE,?LINE]),
+    Result=case rpc:call(PodNode,application,start,[App],2*60*1000) of
+	       ok->
+		   {ok,[App]};
+	       {error,{already_started,App}}->
+		   {ok,[already_started,App]};
+	       {Error,Reason}->
+		   {Error,[Reason,application,PodNode,start,App,?FUNCTION_NAME,?MODULE,?LINE]}
+	   end,
+    Result.
+
+load_start(WantedPodSpec,Reference)->
+    ?PrintLog(log,"load_start",[WantedPodSpec,Reference,?FUNCTION_NAME,?MODULE,?LINE]),
+    load_start(WantedPodSpec,Reference,worker_nodes).
+load_start(WantedPodSpec,Reference,Type)->
+    Result=case db_pod:read(Reference) of
+	       []->
+		%   ?PrintLog(ticket," Reference eexists",[Reference,Type,?FUNCTION_NAME,?MODULE,?LINE]),
+		   {error,["Reference eexists",Reference,Type,?FUNCTION_NAME,?MODULE,?LINE]};
+	       [{Reference,PodNode,PodDir,PodSpecs,HostNode,Created}]->
+		   PodLoadResult=rpc:call(node(),pod,load,[WantedPodSpec,HostNode,PodNode,PodDir],25*1000),
+		   case PodLoadResult  of
+		       {ok,_}->
+			   PodstartResult=rpc:call(node(),pod,start,[PodNode,WantedPodSpec],25*1000),
+		%	   ?PrintLog(debug,"PodstartResult",[PodstartResult,?FUNCTION_NAME,?MODULE,?LINE]),
+			   case PodstartResult of
+			       {ok,Reason2}->
+				   {atomic,ok}=db_pod:add_spec(Reference,WantedPodSpec),
+				   {ok,Reason2};
+			       {Error,Reason2}->
+				   {Error,Reason2,pod,start,?FUNCTION_NAME,?MODULE,?LINE}
+			   end;
+		       {Error,Reason}->
+			   {Error,Reason,pod,load,?FUNCTION_NAME,?MODULE,?LINE}
+		   end;
+	       UnMatched ->
+		   ?PrintLog(ticket,"UnMatched",[UnMatched,WantedPodSpec,Reference,?FUNCTION_NAME,?MODULE,?LINE]),
+		   {error,[ticket,"unmatched signal",[UnMatched,?FUNCTION_NAME,?MODULE,?LINE]]}
+	   end,
+    ?PrintLog(log,"load_start, Result=",[Result,WantedPodSpec,Reference,?FUNCTION_NAME,?MODULE,?LINE]),
+    Result.
+			  
+	       
+%% --------------------------------------------------------------------
+%% Function:start/0 
+%% Description: Creates a slave node via HostNode 
+%% NodeName=pod_microseconds_clusterId_HostId
+%% PodDir=clusterId/pod_microseconds
+%% AppDir=PodDir/AppId
+%% AppPa=AppDir/ebin
+%% Returns: non
+%% --------------------------------------------------------------------
+delete_node(Node)->
+    rpc:call(Node,init,stop,[],5*1000).
+delete_node(Node,Dir)->
+    rpc:call(Node,os,cmd,["rm -rf "++Dir],5*1000),
+    rpc:call(Node,init,stop,[],5*1000).
+
+create_node(Ip,SshPort,UId,Pwd,HostId,NodeName,ErlCallArgs)->
+
+
+    
+    ErlCmd="erl_call -s "++ErlCallArgs, 
+    SshCmd="nohup "++ErlCmd++" &",
+    ErlCallResult=rpc:call(node(),my_ssh,ssh_send,[Ip,SshPort,UId,Pwd,SshCmd,2*5000],3*5000),
+  %  Resuĺt=case   rpc:call(node(),my_ssh,ssh_send,[Ip,SshPort,UId,Pwd,SshCmd,2*5000],3*5000) of
+    Result=case ErlCallResult of
+	       {badrpc,timeout}->
+		   ?PrintLog(ticket,"Failed to start node",[Ip,SshPort,UId,Pwd,NodeName,ErlCallArgs,badrpc,timeout,?FUNCTION_NAME,?MODULE,?LINE]),
+		   {error,[{badrpc,timeout},Ip,SshPort,UId,Pwd,NodeName,ErlCallArgs,?FUNCTION_NAME,?MODULE,?LINE]};
+	       {error,Reason}->
+		   ?PrintLog(ticket,"Failed to start node",[Ip,SshPort,UId,Pwd,NodeName,ErlCallArgs,error,Reason,?FUNCTION_NAME,?MODULE,?LINE]),
+		   {error,[Reason,?FUNCTION_NAME,?MODULE,?LINE]};
+	       StartResult->
+		   case node_started(Node) of
+		       true->
+			  % ?PrintLog(debug,"  {atomic,ok}",[ClusterAddResult,Node,HostId,?FUNCTION_NAME,?MODULE,?LINE]),
+			   {ok,Node,HostId,Ip,SshPort};
+		       false->
+			   ?PrintLog(ticket,"Failed to connect to node",[Ip,SshPort,UId,Pwd,HostId,NodeName,ErlCallArgs,?FUNCTION_NAME,?MODULE,?LINE]),
+			   {error,["Failed to connect to node",Ip,SshPort,UId,Pwd,HostId,NodeName,ErlCallArgs,?MODULE,?FUNCTION_NAME,?LINE]}
+		   end
+	   end,
+    Result.
+		   
+	      
+node_started(Node)->
+    check_started(50,Node,10,false).
+    
+check_started(_N,_Vm,_SleepTime,true)->
+   true;
+check_started(0,_Vm,_SleepTime,Result)->
+    Result;
+check_started(N,Vm,SleepTime,_Result)->
+ %   io:format("net_Adm ~p~n",[net_adm:ping(Vm)]),
+    NewResult= case net_adm:ping(Vm) of
+	%case rpc:call(node(),net_adm,ping,[Vm],1000) of
+		  pong->
+		     true;
+		  pang->
+		       timer:sleep(SleepTime),
+		       false;
+		   {badrpc,_}->
+		       timer:sleep(SleepTime),
+		       false
+	      end,
+    check_started(N-1,Vm,SleepTime,NewResult).
+
+%% --------------------------------------------------------------------
+%% Function:start/0 
+%% Description: Creates a slave node via HostNode 
+%% NodeName=pod_microseconds_clusterId_HostId
+%% PodDir=clusterId/pod_microseconds
+%% AppDir=PodDir/AppId
+%% AppPa=AppDir/ebin
+%% Returns: non
+%% --------------------------------------------------------------------
+   
+create_slave(HostNode,HostId,NodeName,ErlArgs)->
+    Result= case rpc:call(HostNode,slave,start,[HostId,NodeName,ErlArgs],5*1000) of
+		{ok,PodNode}->	
+		    case net_adm:ping(PodNode) of
+			pang->
+			    {error,[ticket,"failed to start PodNode",[PodNode,HostNode,HostId,NodeName,ErlArgs,?FUNCTION_NAME,?MODULE,?LINE]]};
+			pong ->
+			    {ok,PodNode}
+		    end;
+		{Error,Reason} ->
+		    {error,[ticket,"failed to start slave",[Error,Reason,HostNode,HostId,NodeName,ErlArgs,?FUNCTION_NAME,?MODULE,?LINE]]}
+	    end,
+    Result.
+
+%% --------------------------------------------------------------------
+%% Function:start/0 
+%% Description: Creates a slave node via HostNode 
+%% NodeName=pod_microseconds_clusterId_HostId
+%% PodDir=clusterId/pod_microseconds
+%% AppDir=PodDir/AppId
+%% AppPa=AppDir/ebin
+%% Returns: non
+%% --------------------------------------------------------------------
+create_slave(HostNode,HostId,NodeName,ErlArgs,PodDir)->
+    rpc:call(HostNode,os,cmd,["rm -rf "++PodDir],5*1000),
+    Result=case rpc:call(HostNode,file,make_dir,[PodDir],5*1000) of
+	       ok->
+		   case rpc:call(HostNode,slave,start,[HostId,NodeName,ErlArgs],5*1000) of
+		       {ok,PodNode}->	
+			   case net_adm:ping(PodNode) of
+			       pang->
+				   {error,[ticket,"failed to start PodNode",[PodNode,HostNode,HostId,NodeName,PodDir,ErlArgs,
+									     ?FUNCTION_NAME,?MODULE,?LINE]]};
+			       pong ->
+				   {ok,PodNode}
+			   end;
+		       {Error,Reason} ->
+			   {error,[ticket,"failed to start slave",[Error,Reason,HostNode,HostId,NodeName,PodDir,ErlArgs,
+								   ?FUNCTION_NAME,?MODULE,?LINE]]}
+		   end;
+	       {Error,Reason} ->
+		   {error,[ticket,"failed to create dir",[Error,Reason,HostNode,HostId,NodeName,PodDir,ErlArgs,
+							  ?FUNCTION_NAME,?MODULE,?LINE]]}
+	   end,
+    Result.
+
+%% --------------------------------------------------------------------
+%% Function:start/0 
+%% Description: Creates a slave node via HostNode 
+%% NodeName=pod_microseconds_clusterId_HostId
+%% PodDir=clusterId/pod_microseconds
+%% AppDir=PodDir/AppId
+%% AppPa=AppDir/ebin
+%% Returns: non
+%% --------------------------------------------------------------------
+delete_slave(HostNode,PodNode,PodDir)->
+    Result=case rpc:call(HostNode,os,cmd,["rm -rf "++PodDir],2*1000) of
+	       []->
+		   rpc:call(HostNode,slave,stop,[PodNode],2*1000);    
+	       Error ->
+		   ?PrintLog(ticket,"Error",[Error,HostNode,PodNode,PodDir,?FUNCTION_NAME,?MODULE,?LINE]),
+		   {error,[ticket,"Error",[Error,HostNode,PodNode,PodDir,?FUNCTION_NAME,?MODULE,?LINE]]}
+	   end,
+    Result.
+%% --------------------------------------------------------------------
+%% Function:start/0 
+%% Description: Creates a slave node via HostNode 
+%% NodeName=pod_microseconds_clusterId_HostId
+%% PodDir=clusterId/pod_microseconds
+%% AppDir=PodDir/AppId
+%% AppPa=AppDir/ebin
+%% Returns: non
+%% --------------------------------------------------------------------
+delete_slave(HostNode,PodNode)->
+    Result=case rpc:call(HostNode,slave,stop,[PodNode],2*1000) of
+	       {badrpc,Reason}->
+		   ?PrintLog(ticket,"Error",[badrpc,Reason,HostNode,PodNode,?FUNCTION_NAME,?MODULE,?LINE]),
+		   {error,[ticket,"Error",[badrpc,Reason,HostNode,PodNode,?FUNCTION_NAME,?MODULE,?LINE]]};    
+	       ok ->
+		   ok 
+	   end,
+    Result.

@@ -1,0 +1,181 @@
+%%% -------------------------------------------------------------------
+%%% Author  : uabjle
+%%% Description : 
+%%% ToDo 
+%%% 1. New cluster
+%%% 2. Check existing cluster -> restart missing node vms
+%%%
+%%% Created : 10 dec 2012
+%%% -------------------------------------------------------------------
+-module(pod).    
+   
+%% --------------------------------------------------------------------
+%% Include files
+%% --------------------------------------------------------------------
+-include("kube_logger.hrl").
+%%---------------------------------------------------------------------
+%% Records & defintions
+%%---------------------------------------------------------------------
+%missing clusters
+%running clusters
+
+%% --------------------------------------------------------------------
+-export([
+       	 create/1,
+	 delete/1,
+       	 create/2,
+	 delete/2,
+
+	 load/0,
+	 load_start/2,
+	 load_start/3
+	 
+	]).
+
+
+%% ====================================================================
+%% External functions
+%% ====================================================================  
+%% --------------------------------------------------------------------
+%% Function:start/0 
+%% Description: Creates a slave node via HostNode 
+%% NodeName=pod_microseconds_clusterId_HostId
+%% PodDir=clusterId/pod_microseconds
+%% AppDir=PodDir/AppId
+%% AppPa=AppDir/ebin
+%% Returns: non
+%% --------------------------------------------------------------------
+load(WantedPodSpec,HostNode,PodNode)->
+    [{PodId,PodVsn,AppId,AppVsn,AppGitPath,AppEnv,AppHosts}]=db_pod_spec:read(WantedPodSpec),
+    GitPath=db_pod_spec:git_path(WantedPodSpec),
+    AppDir=filename:join(PodDir,AppId),
+    ?PrintLog(debug,"AppDir",[AppDir,?FUNCTION_NAME,?MODULE,?LINE]),
+    AppEbin=filename:join(AppDir,"ebin"),
+    App=list_to_atom(AppId),
+    rpc:call(HostNode,os,cmd,["rm -rf "++AppId],5*1000),
+    GitResult=rpc:call(HostNode,os,cmd,["git clone "++GitPath],5*1000),
+    ?PrintLog(log,"GitResult",[PodNode,GitPath,GitResult,?FUNCTION_NAME,?MODULE,?LINE]),
+    MVResult=rpc:call(HostNode,os,cmd,["mv "++AppId++" "++AppDir],5*1000),
+    ?PrintLog(log,"MVResult",[AppId,AppDir,MVResult,?FUNCTION_NAME,?MODULE,?LINE]),
+    true=rpc:call(PodNode,code,add_patha,[AppEbin],2*1000),
+    ok.
+
+start()->
+    ok.
+
+load_start(WantedPodSpec,Reference)->
+    load_start(WantedPodSpec,Reference,worker_nodes).
+load_start(WantedPodSpec,Reference,Type)->
+    Result=case [{XReference,PodNode,PodDir,HostNode,WantedHostId}||{XReference,PodNode,PodDir,HostNode,WantedHostId}<-db_cluster:read(Type),
+								   Reference==XReference]of
+	       []->
+		   ?PrintLog(ticket," Reference eexists",[Reference,Type,?FUNCTION_NAME,?MODULE,?LINE]),
+		   {error,["Reference eexists",Reference,Type,?FUNCTION_NAME,?MODULE,?LINE]};
+	       [{Reference,PodNode,PodDir,HostNode,_WantedHostId}]->
+		   case rpc:call(node,pod,load,[WantedPodSpec,HostNode,PodNode],5*1000) of
+		       {ok,Reason}->
+			   case rpc:call(node(),pod,start,[],5*1000) of
+			       {ok,Reason}->
+				   {ok,Reason};
+			       {Error,Reason}->
+				   {Error,Reason}
+			   end;
+		       {Error,Reason}->
+			   {Error,Reason}
+		   end
+	   end,
+
+			   
+		   case db_pod_spec:read(WantedPodSpec) of
+			       []->
+			   ?PrintLog(ticket,"WantedPodSpec eexists",[WantedPodSpec,PodNode,?FUNCTION_NAME,?MODULE,?LINE]),
+			   {error,["WantedPodSpec eexists",WantedPodSpec,PodNode,?FUNCTION_NAME,?MODULE,?LINE]};				   
+		       [PodInfo]->
+			   RunningApps=rpc:call(PodNode,application,which_applications,[],3*1000),
+			   case lists:keymember(list_to_atom(AppId),1,RunningApps) of
+			       true->
+				   ?PrintLog(log,"already started",[WantedPodSpec,AppId,PodNode,Reference,Type,?FUNCTION_NAME,?MODULE,?LINE]),
+				   {error,['already started',AppId,PodNode]};
+			       false ->
+				   GitPath=db_pod_spec:git_path(WantedPodSpec),
+				   AppDir=filename:join(PodDir,AppId),
+				   ?PrintLog(debug,"AppDir",[AppDir,?FUNCTION_NAME,?MODULE,?LINE]),
+				   AppEbin=filename:join(AppDir,"ebin"),
+				   App=list_to_atom(AppId),
+				   rpc:call(HostNode,os,cmd,["rm -rf "++AppId],5*1000),
+				   GitResult=rpc:call(HostNode,os,cmd,["git clone "++GitPath],5*1000),
+				   ?PrintLog(log,"GitResult",[PodNode,GitPath,GitResult,?FUNCTION_NAME,?MODULE,?LINE]),
+				   MVResult=rpc:call(HostNode,os,cmd,["mv "++AppId++" "++AppDir],5*1000),
+				   ?PrintLog(log,"MVResult",[AppId,AppDir,MVResult,?FUNCTION_NAME,?MODULE,?LINE]),
+				   true=rpc:call(PodNode,code,add_patha,[AppEbin],2*1000),
+				   case AppEnv of
+				       []->
+					   ok;
+				       _->
+					   true=rpc:call(PodNode,application,set_env,[[{App,AppEnv}]],2*1000)
+				   end, 
+				   case rpc:call(PodNode,application,start,[App],5*1000) of
+				       ok->
+					   ?PrintLog(log,"Started",[App,PodNode,?FUNCTION_NAME,?MODULE,?LINE]),
+					   {ok,[App,PodNode]};
+				       Error ->
+					   ?PrintLog(ticket,"Error",[Error,App,PodNode,?FUNCTION_NAME,?MODULE,?LINE]),
+					   {error,[Error,App,PodNode]}
+				   end
+			   end
+		   end,
+    Result.
+	       
+%% --------------------------------------------------------------------
+%% Function:start/0 
+%% Description: Creates a slave node via HostNode 
+%% NodeName=pod_microseconds_clusterId_HostId
+%% PodDir=clusterId/pod_microseconds
+%% AppDir=PodDir/AppId
+%% AppPa=AppDir/ebin
+%% Returns: non
+%% --------------------------------------------------------------------
+create(WantedHostId)->
+    create(WantedHostId,worker_nodes).
+create(WantedHostId,Type)->
+    Result=case [HostNode||{HostNode,HostId}<-db_cluster:read(host_nodes),
+			   HostId==WantedHostId] of
+	       []->
+		   ?PrintLog(ticket,"WantedHost eexists",[WantedHostId,?FUNCTION_NAME,?MODULE,?LINE]),
+		   {error,["WantedHost eexists",WantedHostId,?FUNCTION_NAME,?MODULE,?LINE]};
+	       [HostNode]->
+		   CookieAtom=db_cluster:read(cookie),
+		   ClusterId=db_cluster:read(cluster_id),
+		   SystemTime=integer_to_list(erlang:system_time(microsecond)),
+		   NodeName="pod_"++SystemTime++"_"++ClusterId++"_"++WantedHostId,
+		   PodDirName="pod_"++SystemTime++"_"++ClusterId,
+		   PodDir=filename:join(ClusterId,PodDirName),
+		   Reference=PodDirName,
+		   Args="-setcookie "++atom_to_list(CookieAtom),
+		   rpc:call(HostNode,os,cmd,["rm -rf "++PodDir],5*1000),
+		   ok=rpc:call(HostNode,file,make_dir,[PodDir],5*1000),
+		   {ok,PodNode}=rpc:call(HostNode,slave,start,[WantedHostId,NodeName,Args],5*1000),
+		   {atomic,ok}=db_cluster:add(Type,{Reference,PodNode,PodDir,HostNode,WantedHostId}),
+		   ?PrintLog(debug,"PodNode info",[{Reference,PodNode,PodDir,HostNode,WantedHostId},?FUNCTION_NAME,?MODULE,?LINE]),
+		   {ok,Reference}
+	   end,
+    Result.
+
+delete(DeleteReference)->
+    delete(DeleteReference,worker_nodes).
+delete(DeleteReference,Type)->
+    Result=case [{Reference,PodNode,PodDir,HostNode,WantedHostId}||{Reference,PodNode,PodDir,HostNode,WantedHostId}<-db_cluster:read(Type),
+			 Reference==DeleteReference]of
+	       []->
+		   ?PrintLog(ticket,"PodNode eexists",[DeleteReference,Type,?FUNCTION_NAME,?MODULE,?LINE]),
+		   {error,["WantedHost eexists",DeleteReference,Type,?FUNCTION_NAME,?MODULE,?LINE]};
+	       [{Reference,PodNode,PodDir,HostNode,WantedHostId}]->
+		   
+		   rpc:call(HostNode,os,cmd,["rm -rf "++PodDir],2*1000),
+		   rpc:call(HostNode,slave,stop,[PodNode],2*1000),
+		   {atomic,ok}=db_cluster:remove(Type,{Reference,PodNode,PodDir,HostNode,WantedHostId}),
+		   ok
+	   end,
+    Result.
+		   
+
