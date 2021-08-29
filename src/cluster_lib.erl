@@ -31,8 +31,7 @@
 	 load_start/3,
 	 stop_unload/3,
 
-	 strive_desired_state/0,
-	 strive_desired_state/1
+	 strive_desired_state/0
 	]).
 
 
@@ -45,27 +44,56 @@
 %% Returns: non
 %% --------------------------------------------------------------------
 strive_desired_state()->
-    ClusterId=db_cluster_info:cluster(),
-    ?PrintLog(debug,"ClusterId",[ClusterId,?FUNCTION_NAME,?MODULE,?LINE]),
-    strive_desired_state(ClusterId).
+    ClusterId=sd:call(etcd,db_cluster_info,cluster,[],5*1000),
+    Result= case find_nodes_wo_kubelet_loaded() of
+		 {error,Reason}->
+		    {error,Reason};
+		{ok,FindNodeWOKubeletLoaded,RunningHosts,MissingHosts}->
+		 %   case strive_desired_state(ClusterId,FindNodeWOKubeletLoaded) of
+		    case FindNodeWOKubeletLoaded of
+			{error,Reason}->
+			    {error,[Reason,?FUNCTION_NAME,?MODULE,?LINE]};
+			FindNodeWOKubeletLoaded->
+			    StartKubeletNodesInfo=start_kubelet_nodes(FindNodeWOKubeletLoaded,ClusterId),
+			    case StartKubeletNodesInfo of
+				{error,Reason}->
+				    {error,Reason};
+				{ok,StartInfo}->
+				 %   ?PrintLog(log,"RunningHosts ",[RunningHosts ,?FUNCTION_NAME,?MODULE,?LINE]),
+				 %   ?PrintLog(log,"MissingHosts ",[MissingHosts ,?FUNCTION_NAME,?MODULE,?LINE]),
+				    ClusterStatus=examine_state(StartInfo,RunningHosts,MissingHosts),
+			%	    ?PrintLog(log,"ClusterStatus ",[ClusterStatus ,?FUNCTION_NAME,?MODULE,?LINE]),
+				    ClusterStatus			    
+			    end
+		    end
+	    end,
+    Result.
 
-strive_desired_state(ClusterId)->
-    FindNodeWOKubeletLoaded=find_nodes_wo_kubelet_loaded(),
-    ?PrintLog(debug,"FindNodeWOKubeletLoaded",[FindNodeWOKubeletLoaded,?FUNCTION_NAME,?MODULE,?LINE]),
-    StartResult=case FindNodeWOKubeletLoaded of
-		    {error,Reason}->
-			{error,[Reason,?FUNCTION_NAME,?MODULE,?LINE]};
-		    {ok,HostWithOutKubelet}->
-			StartKubeletNodesInfo=start_kubelet_nodes(HostWithOutKubelet,ClusterId),
-		%	?PrintLog(debug,"StartKubeletNodesInfo",[StartKubeletNodesInfo,?FUNCTION_NAME,?MODULE,?LINE]),
-			case StartKubeletNodesInfo of
-			    {error,Reason}->
-				{error,Reason};
-			    {ok,StartInfo}->
-				{ok,StartInfo}
-			end
-		end,
-    {ok,StartResult,find_nodes_wo_kubelet_loaded()}.
+examine_state([],_RunningHosts,[])->
+    {ok,{"In desired state",[]}};
+examine_state(StartInfo,RunningHosts,[])->
+    {error,{"Starting found hosts without kubelet",[StartInfo]}};
+examine_state([],_RunningHosts,MissingHosts)->
+    {error,{"Missing hosts",[MissingHosts]}};
+examine_state(StartInfo,_RunningHosts,MissingHosts)->
+    {error,{"Starting found Host and missing hosts",[StartInfo,MissingHosts]}};
+examine_state(StartInfo,RunningHosts,MissingHosts)->
+    {error,{unmatched,[StartInfo,RunningHosts,MissingHosts]}}.
+		     
+%strive_desired_state(ClusterId,FindNodeWOKubeletLoaded)->
+ %   StartResult=case FindNodeWOKubeletLoaded of
+%		    {error,Reason}->
+%			{error,[Reason,?FUNCTION_NAME,?MODULE,?LINE]};
+%		    {ok,HostWithOutKubelet}->
+%			StartKubeletNodesInfo=start_kubelet_nodes(HostWithOutKubelet,ClusterId),
+%			case StartKubeletNodesInfo of
+%			    {error,Reason}->
+%				{error,Reason};
+%			    {ok,StartInfo}->
+%				{ok,StartInfo}
+%			end
+%		end,
+ %   StartResult.
 		
 find_nodes_wo_kubelet_loaded()->
     Result=case rpc:call(node(),host,status_all_hosts,[],20*1000) of
@@ -73,13 +101,11 @@ find_nodes_wo_kubelet_loaded()->
 		   {error,[badrpc,Reason,?FUNCTION_NAME,?MODULE,?LINE]};
 	       {error,Reason}->
 		   {error,[Reason,?FUNCTION_NAME,?MODULE,?LINE]};
-	       {ok,RunningHosts,_MissingHosts}-> 
-		   ?PrintLog(debugZZZZZ,"RunningHosts",[RunningHosts,?FUNCTION_NAME,?MODULE,?LINE]),
+	       {ok,RunningHosts,MissingHosts}-> 
 		   HostsWithKubelete=get_nodes_with_kubelet_runing(),
-		   ?PrintLog(debugZZZZZ,"HostsWithKubelete",[HostsWithKubelete,?FUNCTION_NAME,?MODULE,?LINE]),
-		   HostWithOutKubelet=[{Alias,HostId}||{Alias,HostId}<-RunningHosts,
+		   FindNodeWOKubeletLoaded=[{Alias,HostId}||{Alias,HostId}<-RunningHosts,
 							   false==lists:keymember(HostId,2,HostsWithKubelete)],
-		   {ok,HostWithOutKubelet}
+		   {ok,FindNodeWOKubeletLoaded,RunningHosts,MissingHosts}
 	   end,
     Result.
 get_nodes_with_kubelet_runing()->   
@@ -95,7 +121,6 @@ get_nodes_with_kubelet_runing()->
 start_kubelet_nodes(HostWithOutKubelet,ClusterId)->
     F1=fun map_create_kubelet_node/2,
     F2=fun check_kubelet_node_start/3,
-    ?PrintLog(debug_XXXX,"HostWithOutKubelet,ClusterId ",[HostWithOutKubelet,ClusterId,?FUNCTION_NAME,?MODULE,?LINE]),
     StartList=[{HostInfo,ClusterId}||HostInfo<-HostWithOutKubelet],
     StartResult=mapreduce:start(F1,F2,[],StartList),
     Result=case [{error,Reason}||{error,Reason}<-StartResult] of
@@ -107,7 +132,6 @@ start_kubelet_nodes(HostWithOutKubelet,ClusterId)->
     Result.
 
 map_create_kubelet_node(Parent,{HostInfo,ClusterId})->
-    ?PrintLog(debug_XXXX,"{HostInfo,ClusterId}",[{HostInfo,ClusterId},?FUNCTION_NAME,?MODULE,?LINE]),
     Parent!{create_kubelet_node,start_kubelet_node(HostInfo,ClusterId)}.
 
 
@@ -137,8 +161,7 @@ start_kubelet_node({Alias,_HostId},ClusterId)->
 	       {error,Reason}->
 		   {error,Reason};
 	       {ok,Pod}->
-		  ?PrintLog(debug_XXXX,"Pod,Alias,ClusterId",[Pod,Alias,ClusterId,?FUNCTION_NAME,?MODULE,?LINE]),
-		   Dir=sd:call(etcd,db_kubelet,dir,[Pod],5*1000),
+		  Dir=sd:call(etcd,db_kubelet,dir,[Pod],5*1000),
 		   PodSpecs=["support","kubelet"],
 		   Containers=lists:append([sd:call(etcd,db_pod_spec,containers,[PodSpec],5*1000)||PodSpec<-PodSpecs]),
 		   StartResult=[load_start(Pod,Container,Dir)||Container<-Containers],
@@ -161,17 +184,16 @@ start_kubelet_node({Alias,_HostId},ClusterId)->
 create_kubelet_node(Alias,ClusterId)->
    
     PodId="kubelet",
-    Cookie=db_cluster_spec:cookie(ClusterId),
-    HostId=db_host_info:host_id(Alias),
-  %  ?PrintLog(log,"Alias,ClusterId,Cookie,HostId",[Alias,ClusterId,Cookie,HostId,?FUNCTION_NAME,?MODULE,?LINE]),
+    Cookie=sd:call(etcd,db_cluster_spec,cookie,[ClusterId],5*1000),
+    HostId=sd:call(etcd,db_host_info,host_id,[Alias],5*1000),
     NodeName=?KubeletNodeName(ClusterId,HostId),
     Dir=ClusterId,
     Result=case pod:create_node(Alias,NodeName,Cookie) of
 	       {error,Reason}->
 		   {error,Reason};
 	       {ok,Pod}->
-		   HostId=db_host_info:host_id(Alias),
-		   {atomic,ok}=db_kubelet:create(PodId,HostId,ClusterId,Pod,Dir,Pod,Cookie,[]),
+		   HostId=sd:call(etcd,db_host_info,host_id,[Alias],5*1000),
+		   {atomic,ok}=sd:call(etcd,db_kubelet,create,[PodId,HostId,ClusterId,Pod,Dir,Pod,Cookie,[]],5*1000),
 		   rpc:call(Pod,os,cmd,["rm -rf "++Dir],3*1000),
 		   case rpc:call(Pod,file,make_dir,[Dir],5*1000) of
 		       {error,Reason}->
@@ -203,7 +225,7 @@ stop_node(Pod,Container,Dir)->
 		       {error,Reason}->
 			   {error,Reason};
 		       ok ->
-			   case db_kubelet:delete(Pod) of
+			   case sd:call(etcd,db_kubelet,delete,[Pod],5*1000) of
 			       {atomic,ok}->
 				   ok;
 			       Reason->
@@ -243,7 +265,7 @@ stop_unload(Pod,Container,Dir)->
 		   {error,[Reason,Pod,Container,Dir,?FUNCTION_NAME,?MODULE,?LINE]};
    
 	       ok->
-		   case db_kubelet:delete_container(Pod,Container) of
+		   case sd:call(etcd,db_kubelet,delete_container,[Pod,Container],5*1000) of
 		       {atomic,ok}->
 			   ok;
 		       Reason->

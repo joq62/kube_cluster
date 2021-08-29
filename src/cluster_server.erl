@@ -18,7 +18,7 @@
 %% Key Data structures
 %% 
 %% --------------------------------------------------------------------
--record(state, {host_status}).
+-record(state, {cluster_status}).
 
 
 
@@ -72,7 +72,7 @@ init([]) ->
     spawn(fun()->cluster_status_interval() end),    
 
     ?PrintLog(log,"STARTED SERVER",[node(),?FUNCTION_NAME,?MODULE,?LINE]),
-    {ok, #state{host_status=[]}}.
+    {ok, #state{cluster_status=undefined}}.
     
 %% --------------------------------------------------------------------
 %% Function: handle_call/3
@@ -108,9 +108,17 @@ handle_call(Request, From, State) ->
 
 
 handle_cast({cluster_status,Status}, State) ->
-    ?PrintLog(log," cluster_status  = ",[Status,?FUNCTION_NAME,?MODULE,?LINE]),
+    ChangedStatus=Status/=State#state.cluster_status,
+    NewState=case ChangedStatus of
+	       false->
+		   State;
+	       true->
+		   ?PrintLog(log,"Changed cluster_status  = ",[Status,?FUNCTION_NAME,?MODULE,?LINE]),
+		   State#state{cluster_status=Status}
+	   end,
+  
     spawn(fun()->cluster_status_interval() end),  
-    {noreply, State};
+    {noreply, NewState};
 
 handle_cast(Msg, State) ->
     io:format("unmatched match cast ~p~n",[{?MODULE,?LINE,Msg}]),
@@ -164,8 +172,12 @@ code_change(_OldVsn, State, _Extra) ->
 %% Returns: non
 %% --------------------------------------------------------------------
 cluster_status_interval()->
+    ?PrintLog(log,"START ",[?FUNCTION_NAME,?MODULE,?LINE]),
     timer:sleep(10*1000),
-    Result=rpc:call(node(),cluster_lib,strive_desired_state,[],1*60*1000),
+ %   ?PrintLog(log,"Start ",[cluster_lib,strive_desired_state,?FUNCTION_NAME,?MODULE,?LINE]),
+    Result=rpc:call(node(),cluster_lib,strive_desired_state,[],3*60*1000),
+ %   ?PrintLog(log,"Result desired state",[Result,?FUNCTION_NAME,?MODULE,?LINE]),
     timer:sleep(?ClusterStatusInterval),
-    io:format("~p~n",[{rpc:cast(node(),cluster,cluster_status,[Result]),?FUNCTION_NAME,?MODULE,?LINE}]).
+    rpc:cast(node(),cluster,cluster_status,[Result]),
+    ?PrintLog(log,"END ",[?FUNCTION_NAME,?MODULE,?LINE]).
 	    
