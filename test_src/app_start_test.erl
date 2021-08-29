@@ -11,7 +11,7 @@
 %% --------------------------------------------------------------------
 -include_lib("eunit/include/eunit.hrl").
 %% --------------------------------------------------------------------
--define(APP,iaas).
+
 %% External exports
 -export([start/0]).
 
@@ -52,6 +52,8 @@ start()->
 
 setup()->
 
+    io:format("nodes() ~p~n",[{nodes(),?FUNCTION_NAME,?MODULE,?LINE}]),
+    
     {ok,ClusterIdAtom}=application:get_env(unit_test,cluster_id),
     ClusterId=atom_to_list(ClusterIdAtom),
     os:cmd("rm -rf "++ClusterId),
@@ -60,7 +62,11 @@ setup()->
     MonitorNodeName=atom_to_list(MonitorNodeNameAtom),
     {ok,HostId}=inet:gethostname(),
     MonitorNode=list_to_atom(MonitorNodeName++"@"++HostId),
-    Env=[{cluster_id,ClusterIdAtom},{monitor_node,MonitorNode}],
+  
+    {ok,CookieAtom}=application:get_env(unit_test,cookie),
+    Cookie=atom_to_list(CookieAtom),
+    Env=[{cluster_id,ClusterId},{monitor_node,MonitorNodeName},
+	 {cookie,Cookie}],
     ok=application:set_env([{support,Env},
 			    {kubelet,Env},
 			    {etcd,Env},
@@ -68,7 +74,8 @@ setup()->
     ok=application:start(support),
     ok=application:start(etcd),
     ok=application:start(kubelet),
-    ok=application:start(cluster),
+    io:format("~p~n",[{application:start(cluster),?MODULE,?LINE}]),
+  %  ok=application:start(cluster),
 
   
     ok.

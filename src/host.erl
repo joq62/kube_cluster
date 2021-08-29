@@ -47,8 +47,8 @@ status_all_hosts()->
    % io:format("AllHosts = ~p~n",[{?MODULE,?LINE,AllHosts}]),
     Status=mapreduce:start(F1,F2,[],AllHosts),
   %  io:format("Status = ~p~n",[{?MODULE,?LINE,Status}]),
-    Running=[{running,Alias,HostId,Ip,Port}||{running,Alias,HostId,Ip,Port}<-Status],
-    Missing=[{missing,Alias,HostId,Ip,Port}||{missing,Alias,HostId,Ip,Port}<-Status],
+    Running=[{Alias,HostId}||{running,Alias,HostId,_Ip,_Port}<-Status],
+    Missing=[{Alias,HostId}||{missing,Alias,HostId,_Ip,_Port}<-Status],
     {ok,Running,Missing}.
 
 get_hostname(Parent,{Alias,HostId,IpAddr,Port,User,PassWd})->    

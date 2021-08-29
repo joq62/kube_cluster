@@ -1,6 +1,6 @@
 all:
 #	service
-	rm -rf ebin/* *_ebin test_10 lgh ;
+	rm -rf ebin/* *_ebin test_10 lgh *.lgh;
 	erlc -I ../interfaces -o ebin src/*.erl;
 	rm -rf src/*.beam *.beam  test_src/*.beam test_ebin;
 	rm -rf  *~ */*~  erl_cra*;
@@ -38,11 +38,12 @@ test_10_unit_test:
 	    -unit_test cluster_id test_10\
 	    -unit_test start_host_id c1_varmdo\
 	    -run unit_test start_test test_src/test.config
-test_lgh:
+unit_test:
 	rm -rf lgh_ebin;
 	rm -rf src/*.beam *.beam test_src/*.beam test_ebin;
 	rm -rf  *~ */*~  erl_cra*;
 	mkdir lgh_ebin;
+	mkdir test_ebin;
 #	interface
 	erlc -I ../interfaces -o lgh_ebin ../interfaces/*.erl;
 #	support
@@ -58,9 +59,12 @@ test_lgh:
 	erlc -I ../interfaces -o lgh_ebin ../node/src/*.erl;
 	erlc -I ../interfaces -o lgh_ebin ../applications/kubelet/src/*.erl;
 #	cluster
+	cp ../applications/cluster/src/*.app lgh_ebin;
+	erlc -I ../interfaces -o lgh_ebin ../applications/cluster/src/*.erl;
 	erlc -I ../interfaces -o lgh_ebin src/*.erl;
+#	kube_pod
+	erlc -I ../interfaces -o lgh_ebin ../kube_pod/src/*.erl;
 #	test application
-	mkdir test_ebin;
 	cp test_src/*.app test_ebin;
 	erlc -I ../interfaces -o test_ebin test_src/*.erl;
 	erl -pa lgh_ebin -pa test_ebin\
@@ -68,5 +72,5 @@ test_lgh:
 	    -sname cluster_lgh\
 	    -unit_test monitor_node cluster_lgh\
 	    -unit_test cluster_id lgh\
-	    -unit_test start_host_id c0_lgh\
+	    -unit_test cookie lgh_cookie\
 	    -run unit_test start_test test_src/test.config
