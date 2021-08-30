@@ -85,6 +85,12 @@ init([]) ->
 %%          {stop, Reason, State}            (aterminate/2 is called)
 %% --------------------------------------------------------------------
 
+handle_call({running_hosts},_From,State) ->
+    Reply=rpc:call(node(),host,running,[],20*1000),
+    {reply, Reply, State};
+handle_call({missing_hosts},_From,State) ->
+    Reply=rpc:call(node(),host,missing,[],20*1000),
+    {reply, Reply, State};
 %%------ Standard
 
 handle_call({stop}, _From, State) ->

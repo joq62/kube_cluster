@@ -71,29 +71,15 @@ strive_desired_state()->
 
 examine_state([],_RunningHosts,[])->
     {ok,{"In desired state",[]}};
-examine_state(StartInfo,RunningHosts,[])->
+examine_state(StartInfo,_RunningHosts,[])->
     {error,{"Starting found hosts without kubelet",[StartInfo]}};
 examine_state([],_RunningHosts,MissingHosts)->
     {error,{"Missing hosts",[MissingHosts]}};
 examine_state(StartInfo,_RunningHosts,MissingHosts)->
-    {error,{"Starting found Host and missing hosts",[StartInfo,MissingHosts]}};
-examine_state(StartInfo,RunningHosts,MissingHosts)->
-    {error,{unmatched,[StartInfo,RunningHosts,MissingHosts]}}.
-		     
-%strive_desired_state(ClusterId,FindNodeWOKubeletLoaded)->
- %   StartResult=case FindNodeWOKubeletLoaded of
-%		    {error,Reason}->
-%			{error,[Reason,?FUNCTION_NAME,?MODULE,?LINE]};
-%		    {ok,HostWithOutKubelet}->
-%			StartKubeletNodesInfo=start_kubelet_nodes(HostWithOutKubelet,ClusterId),
-%			case StartKubeletNodesInfo of
-%			    {error,Reason}->
-%				{error,Reason};
-%			    {ok,StartInfo}->
-%				{ok,StartInfo}
-%			end
-%		end,
- %   StartResult.
+    {error,{"Starting found Host and missing hosts",[StartInfo,MissingHosts]}}.
+%examine_state(StartInfo,RunningHosts,MissingHosts)->
+%    {error,{unmatched,[StartInfo,RunningHosts,MissingHosts]}}.
+
 		
 find_nodes_wo_kubelet_loaded()->
     Result=case rpc:call(node(),host,status_all_hosts,[],20*1000) of

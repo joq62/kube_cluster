@@ -9,6 +9,8 @@
 
 
 -export([
+	 running/0,
+	 missing/0,
        	 start_node/0,
 	 status_all_hosts/0,
 	 status/1,
@@ -39,6 +41,13 @@ start_node()->
 %% Description: Initiate the eunit tests, set upp needed processes etc
 %% Returns: non
 %% -------------------------------------------------------------------
+running()->
+    {ok,Running,_}=status_all_hosts(),
+    Running.
+missing()->
+    {ok,_,Missing}=status_all_hosts(),
+    Missing.
+
 status_all_hosts()->
     F1=fun get_hostname/2,
     F2=fun check_host_status/3,
