@@ -39,7 +39,7 @@ test_10_unit_test:
 	    -unit_test start_host_id c1_varmdo\
 	    -run unit_test start_test test_src/test.config
 unit_test:
-	rm -rf lgh_ebin;
+	rm -rf lgh_ebin deployment;
 	rm -rf src/*.beam *.beam test_src/*.beam test_ebin;
 	rm -rf  *~ */*~  erl_cra*;
 	mkdir lgh_ebin;

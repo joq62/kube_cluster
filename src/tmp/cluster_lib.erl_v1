@@ -26,6 +26,7 @@
 %-define(KubeletNode(ClusterId,Alias,HostId),list_to_atom(ClusterId++"_"++"kubelet"++"_"++Alias++"@"++HostId)).
 %% --------------------------------------------------------------------
 -export([
+	 create_kubelet_node/2,
 	 stop_node/3,
 	 load_start/3,
 	 stop_unload/3,
@@ -128,41 +129,74 @@ check_kubelet_node_start([],StartResult)->
 check_kubelet_node_start([StartResult|T],Acc) ->
     check_kubelet_node_start(T,[StartResult|Acc]).
  
-start_kubelet_node({WantedAlias,HostId},ClusterId,DeploymentId)->
- %   DeploymentId="kubelet",
-    DeploymentVsn=sd:call(etcd,db_deployment_spec,vsn,[DeploymentId],5*1000),
-    Cookie=sd:call(etcd,db_cluster_spec,cookie,[ClusterId],5*1000),
-    NodeName="kubelet"++"_"++ClusterId++"_"++HostId,
-    Dir=NodeName++".deployment",  
-    Result=case kubelet:create_vm_ssh(WantedAlias,NodeName,Dir,Cookie) of
+
+%start_kubelet_nodes(HostWithOutKubelet,ClusterId)->
+ %   start_kubelet_node(HostWithOutKubelet,ClusterId,[]).
+
+%start_kubelet_node([],_ClusterId,StartInfo)->
+ %   Result = case [{error,Reason}||{error,Reason}<-StartInfo] of
+%		 []->
+%		     {ok,StartInfo};
+%		 ErrorList->
+%		     {error,[ErrorList,?FUNCTION_NAME,?MODULE,?LINE]}
+%	     end,
+%    Result;
+
+%start_kubelet_node([{Alias,_HostId}|T],ClusterId,Acc)->
+start_kubelet_node({Alias,_HostId},ClusterId,DeploymentSpecName)->
+   Result=case create_kubelet_node(Alias,ClusterId) of
 	       {error,Reason}->
 		   {error,Reason};
-	       {badrpc,Reason}->
-		    {error,[badrpc,Reason]};
-	       {ok,Node}->
-		   Apps=["support","kubelet"],
-		   LoadStart=[kubelet:load_start_app(Node,AppId,Dir)||AppId<-Apps],
-		   case [{error,Reason}||{error,Reason}<-LoadStart] of
-		       []->
-			   DbaseAction=[sd:call(etcd,db_deployment,create,[DeploymentId,DeploymentVsn,XNode,XDir,XAppId,HostId,ClusterId,running],5*1000)||{ok,XAppId,XNode,XDir}<-LoadStart],
-			   case [R||R<-DbaseAction,
-				 {atomic,ok}/=R] of
-			       []->
-				   {ok,LoadStart};
-			       Reason->
-				   {error,Reason}
-			   end
-		   end
+	       {ok,Pod}->
+		  Dir=sd:call(etcd,db_kubelet,dir,[Pod],5*1000),
+		  %PodSpecs=["support","kubelet"],
+		  Containers=lists:append([sd:call(etcd,db_pod_spec,containers,[PodSpec],5*1000)||PodSpec<-PodSpecs]),
+		  StartResult=[load_start(Pod,Container,Dir)||Container<-Containers],
+		  case [{error,Reason}||{error,Reason}<-StartResult] of
+		      []->
+			  {ok,Alias,Pod,Containers};
+		      ErrorList->
+			  {error,[ErrorList,Alias,Pod]}
+		  end
 	   end,
     Result.
-%		   case sd:call(etcd,db_kubelet,create,[PodId,HostId,ClusterId,Node,Dir,Node,Cookie,[]],5*1000) of
-		       
+  %  start_kubelet_node(T,ClusterId,[Result|Acc]).
+
 %% --------------------------------------------------------------------
 %% Function:start/0 
 %% Description: Initiate the eunit tests, set upp needed processes etc
 %% Returns: non
 %% --------------------------------------------------------------------
 
+create_kubelet_node(Alias,ClusterId)->
+   
+    PodId="kubelet",
+    Cookie=sd:call(etcd,db_cluster_spec,cookie,[ClusterId],5*1000),
+    HostId=sd:call(etcd,db_host_info,host_id,[Alias],5*1000),
+    NodeName=?KubeletNodeName(ClusterId,HostId),
+    Dir=ClusterId,
+    Result=case pod:create_node(Alias,NodeName,Cookie) of
+	       {error,Reason}->
+		   {error,Reason};
+	       {ok,Pod}->
+		   HostId=sd:call(etcd,db_host_info,host_id,[Alias],5*1000),
+		   {atomic,ok}=sd:call(etcd,db_kubelet,create,[PodId,HostId,ClusterId,Pod,Dir,Pod,Cookie,[]],5*1000),
+		   rpc:call(Pod,os,cmd,["rm -rf "++Dir],3*1000),
+		   case rpc:call(Pod,file,make_dir,[Dir],5*1000) of
+		       {error,Reason}->
+			   {error,Reason};
+		       {badrpc,Reason}->
+			   {error,[badrpc,Reason,Pod,Alias,?FUNCTION_NAME,?MODULE,?LINE]};
+		       ok->
+			   case sd:call(etcd,db_kubelet,create,[PodId,HostId,ClusterId,Pod,Dir,Pod,Cookie,[]],5*1000) of
+			       {atomic,ok}->
+				   {ok,Pod};
+			       Error ->
+				   {error,[Error,PodId,HostId,ClusterId,Pod,Dir,na,Cookie,[],?FUNCTION_NAME,?MODULE,?LINE]}
+			   end
+		   end
+	   end,
+    Result.
 
 %% --------------------------------------------------------------------
 %% Function:start/0 
@@ -170,7 +204,7 @@ start_kubelet_node({WantedAlias,HostId},ClusterId,DeploymentId)->
 %% Returns: non
 %% --------------------------------------------------------------------
 stop_node(Pod,Container,Dir)->
-    Result=case container:stop_unload(od,Container,Dir) of
+    Result=case container:stop_unload(Pod,Container,Dir) of
 	       {error,Reason}->
 		   {error,[Reason,Pod,Container,Dir,?FUNCTION_NAME,?MODULE,?LINE]};
 	       ok->
@@ -178,7 +212,7 @@ stop_node(Pod,Container,Dir)->
 		       {error,Reason}->
 			   {error,Reason};
 		       ok ->
-			   case sd:call(etcd,db_deployment,delete,[Pod],5*1000) of
+			   case sd:call(etcd,db_kubelet,delete,[Pod],5*1000) of
 			       {atomic,ok}->
 				   ok;
 			       Reason->
@@ -199,7 +233,7 @@ load_start(Pod,Container,Dir)->
 		   {error,Reason};
 	       ok->
 		   case sd:call(etcd,db_kubelet,add_container,[Pod,Container],5*1000) of
-		       {atomic,ok}->			   
+		       {atomic,ok}->
 			   ok;
 		       Reason->
 			   {error,[Reason,Pod,Container,?FUNCTION_NAME,?MODULE,?LINE]}
