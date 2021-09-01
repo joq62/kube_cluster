@@ -136,20 +136,25 @@ start_kubelet_node({WantedAlias,HostId},ClusterId,DeploymentId)->
     Dir=NodeName++".deployment",  
     Result=case kubelet:create_vm_ssh(WantedAlias,NodeName,Dir,Cookie) of
 	       {error,Reason}->
+		   ?PrintLog(ticket,"error",[Reason,?FUNCTION_NAME,?MODULE,?LINE]),
 		   {error,Reason};
 	       {badrpc,Reason}->
+		   ?PrintLog(ticket,"badrpc",[Reason,?FUNCTION_NAME,?MODULE,?LINE]),
 		    {error,[badrpc,Reason]};
 	       {ok,Node}->
 		   Apps=["support","kubelet"],
-		   LoadStart=[kubelet:load_start_app(Node,AppId,Dir)||AppId<-Apps],
+		   LoadStart=[{kubelet:load_start_app(Node,AppId,Dir),AppId}||AppId<-Apps],
+		   ?PrintLog(debug,"LoadStart",[LoadStart,?FUNCTION_NAME,?MODULE,?LINE]),
 		   case [{error,Reason}||{error,Reason}<-LoadStart] of
 		       []->
-			   DbaseAction=[sd:call(etcd,db_deployment,create,[DeploymentId,DeploymentVsn,XNode,XDir,XAppId,HostId,ClusterId,running],5*1000)||{ok,XAppId,XNode,XDir}<-LoadStart],
+			   DbaseAction=[sd:call(etcd,db_deployment,create,[DeploymentId,DeploymentVsn,Node,Dir,XAppId,HostId,ClusterId,running],5*1000)||{ok,XAppId}<-LoadStart],
+			   ?PrintLog(debug,"DbaseAction",[DbaseAction,?FUNCTION_NAME,?MODULE,?LINE]),
 			   case [R||R<-DbaseAction,
 				 {atomic,ok}/=R] of
 			       []->
 				   {ok,LoadStart};
 			       Reason->
+				   ?PrintLog(ticket,"error",[Reason,?FUNCTION_NAME,?MODULE,?LINE]),
 				   {error,Reason}
 			   end
 		   end
@@ -172,16 +177,19 @@ start_kubelet_node({WantedAlias,HostId},ClusterId,DeploymentId)->
 stop_node(Pod,Container,Dir)->
     Result=case container:stop_unload(od,Container,Dir) of
 	       {error,Reason}->
+		   ?PrintLog(ticket,"error",[Reason,?FUNCTION_NAME,?MODULE,?LINE]),
 		   {error,[Reason,Pod,Container,Dir,?FUNCTION_NAME,?MODULE,?LINE]};
 	       ok->
 		   case pod:stop_node(Pod) of
 		       {error,Reason}->
+			   ?PrintLog(ticket,"error",[Reason,?FUNCTION_NAME,?MODULE,?LINE]),
 			   {error,Reason};
 		       ok ->
 			   case sd:call(etcd,db_deployment,delete,[Pod],5*1000) of
 			       {atomic,ok}->
 				   ok;
 			       Reason->
+				   ?PrintLog(ticket,"error",[Reason,?FUNCTION_NAME,?MODULE,?LINE]),
 				   {error,[Reason,Pod,Container,Dir,?FUNCTION_NAME,?MODULE,?LINE]}			       
 			   end
 		   end
@@ -196,12 +204,14 @@ stop_node(Pod,Container,Dir)->
 load_start(Pod,Container,Dir)->
     Result=case container:load_start(Pod,Container,Dir) of
 	       {error,Reason}->
+		   ?PrintLog(ticket,"error",[Reason,?FUNCTION_NAME,?MODULE,?LINE]),
 		   {error,Reason};
 	       ok->
 		   case sd:call(etcd,db_kubelet,add_container,[Pod,Container],5*1000) of
 		       {atomic,ok}->			   
 			   ok;
 		       Reason->
+			   ?PrintLog(ticket,"error",[Reason,?FUNCTION_NAME,?MODULE,?LINE]),
 			   {error,[Reason,Pod,Container,?FUNCTION_NAME,?MODULE,?LINE]}
 		   end
 	   end,
