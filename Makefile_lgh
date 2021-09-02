@@ -39,38 +39,38 @@ test_10_unit_test:
 	    -unit_test start_host_id c1_varmdo\
 	    -run unit_test start_test test_src/test.config
 unit_test:
-	rm -rf varmdo_ebin deployment;
+	rm -rf lgh_ebin deployment;
 	rm -rf src/*.beam *.beam test_src/*.beam test_ebin;
 	rm -rf  *~ */*~  erl_cra*;
-	mkdir varmdo_ebin;
+	mkdir lgh_ebin;
 	mkdir test_ebin;
 #	interface
-	erlc -I ../interfaces -o varmdo_ebin ../interfaces/*.erl;
+	erlc -I ../interfaces -o lgh_ebin ../interfaces/*.erl;
 #	support
-	cp ../applications/support/src/*.app varmdo_ebin;
-	erlc -I ../interfaces -o varmdo_ebin ../kube_support/src/*.erl;
-	erlc -I ../interfaces -o varmdo_ebin ../applications/support/src/*.erl;
+	cp ../applications/support/src/*.app lgh_ebin;
+	erlc -I ../interfaces -o lgh_ebin ../kube_support/src/*.erl;
+	erlc -I ../interfaces -o lgh_ebin ../applications/support/src/*.erl;
 #	etcd
-	cp ../applications/etcd/src/*.app varmdo_ebin;
-	erlc -I ../interfaces -o varmdo_ebin ../kube_dbase/src/*.erl;
-	erlc -I ../interfaces -o varmdo_ebin ../applications/etcd/src/*.erl;
+	cp ../applications/etcd/src/*.app lgh_ebin;
+	erlc -I ../interfaces -o lgh_ebin ../kube_dbase/src/*.erl;
+	erlc -I ../interfaces -o lgh_ebin ../applications/etcd/src/*.erl;
 #	kubelet
-	cp ../applications/kubelet/src/*.app varmdo_ebin;
-	erlc -I ../interfaces -o varmdo_ebin ../node/src/*.erl;
-	erlc -I ../interfaces -o varmdo_ebin ../applications/kubelet/src/*.erl;
+	cp ../applications/kubelet/src/*.app lgh_ebin;
+	erlc -I ../interfaces -o lgh_ebin ../node/src/*.erl;
+	erlc -I ../interfaces -o lgh_ebin ../applications/kubelet/src/*.erl;
 #	cluster
-	cp ../applications/cluster/src/*.app varmdo_ebin;
-	erlc -I ../interfaces -o varmdo_ebin ../applications/cluster/src/*.erl;
-	erlc -I ../interfaces -o varmdo_ebin src/*.erl;
+	cp ../applications/cluster/src/*.app lgh_ebin;
+	erlc -I ../interfaces -o lgh_ebin ../applications/cluster/src/*.erl;
+	erlc -I ../interfaces -o lgh_ebin src/*.erl;
 #	kube_pod
-	erlc -I ../interfaces -o varmdo_ebin ../kube_pod/src/*.erl;
+	erlc -I ../interfaces -o lgh_ebin ../kube_pod/src/*.erl;
 #	test application
 	cp test_src/*.app test_ebin;
 	erlc -I ../interfaces -o test_ebin test_src/*.erl;
-	erl -pa varmdo_ebin -pa test_ebin\
-	    -setcookie varmdo_cookie\
-	    -sname cluster_varmdo\
-	    -unit_test monitor_node cluster_varmdo\
-	    -unit_test cluster_id varmdo\
-	    -unit_test cookie varmdo_cookie\
+	erl -pa lgh_ebin -pa test_ebin\
+	    -setcookie lgh_cookie\
+	    -sname cluster_lgh\
+	    -unit_test monitor_node cluster_lgh\
+	    -unit_test cluster_id lgh\
+	    -unit_test cookie lgh_cookie\
 	    -run unit_test start_test test_src/test.config

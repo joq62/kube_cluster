@@ -48,19 +48,20 @@ strive_desired_state()->
 		 {error,Reason}->
 		    {error,Reason};
 		{ok,FindNodeWOKubeletLoaded,RunningHosts,MissingHosts}->
+		    ?PrintLog(debug,"",[FindNodeWOKubeletLoaded,RunningHosts,MissingHosts,?FUNCTION_NAME,?MODULE,?LINE]), 
 		 %   case strive_desired_state(ClusterId,FindNodeWOKubeletLoaded) of
 		    case FindNodeWOKubeletLoaded of
 			{error,Reason}->
 			    {error,[Reason,?FUNCTION_NAME,?MODULE,?LINE]};
 			FindNodeWOKubeletLoaded->
-			    DeploymentSpecName="node_lgh",
+			    DeploymentSpecName="node",
 			    StartKubeletNodesInfo=start_kubelet_nodes(FindNodeWOKubeletLoaded,ClusterId,DeploymentSpecName),
 			    case StartKubeletNodesInfo of
 				{error,Reason}->
 				    {error,Reason};
 				{ok,StartInfo}->
-				 %   ?PrintLog(log,"RunningHosts ",[RunningHosts ,?FUNCTION_NAME,?MODULE,?LINE]),
-				 %   ?PrintLog(log,"MissingHosts ",[MissingHosts ,?FUNCTION_NAME,?MODULE,?LINE]),
+	%			    ?PrintLog(log,"RunningHosts ",[RunningHosts ,?FUNCTION_NAME,?MODULE,?LINE]),
+	%			    ?PrintLog(log,"MissingHosts ",[MissingHosts ,?FUNCTION_NAME,?MODULE,?LINE]),
 				    ClusterStatus=examine_state(StartInfo,RunningHosts,MissingHosts),
 			%	    ?PrintLog(log,"ClusterStatus ",[ClusterStatus ,?FUNCTION_NAME,?MODULE,?LINE]),
 				    ClusterStatus			    
@@ -90,11 +91,12 @@ find_nodes_wo_kubelet_loaded()->
 	       {ok,RunningHosts,MissingHosts}-> 
 		   HostsWithKubelete=get_nodes_with_kubelet_runing(),
 		   FindNodeWOKubeletLoaded=[{Alias,HostId}||{Alias,HostId}<-RunningHosts,
-							   false==lists:keymember(HostId,2,HostsWithKubelete)],
+							   false==lists:keymember(HostId,2,HostsWithKubelete)], 
 		   {ok,FindNodeWOKubeletLoaded,RunningHosts,MissingHosts}
 	   end,
     Result.
 get_nodes_with_kubelet_runing()->   
+    
     KubeletePing=[rpc:call(Node,kubelet,ping,[],2*1000)||Node<-[node()|nodes()]],
     X=[{KubeletNode,rpc:call(KubeletNode,inet,gethostname,[],5*1000)}||{pong,KubeletNode,_}<-KubeletePing],
     HostsWithKubelete=[{KubeletNode,HostId}||{KubeletNode,{ok,HostId}}<-X],
@@ -147,7 +149,7 @@ start_kubelet_node({WantedAlias,HostId},ClusterId,DeploymentId)->
 		   ?PrintLog(debug,"LoadStart",[LoadStart,?FUNCTION_NAME,?MODULE,?LINE]),
 		   case [{error,Reason}||{error,Reason}<-LoadStart] of
 		       []->
-			   DbaseAction=[sd:call(etcd,db_deployment,create,[DeploymentId,DeploymentVsn,Node,Dir,XAppId,HostId,ClusterId,running],5*1000)||{ok,XAppId}<-LoadStart],
+			   DbaseAction=[sd:call(etcd,db_deployment,create,[DeploymentId,DeploymentVsn,Node,Dir,XAppId,HostId,ClusterId,running],5*1000)||{{ok,_Info},XAppId}<-LoadStart],
 			   ?PrintLog(debug,"DbaseAction",[DbaseAction,?FUNCTION_NAME,?MODULE,?LINE]),
 			   case [R||R<-DbaseAction,
 				 {atomic,ok}/=R] of
@@ -161,7 +163,7 @@ start_kubelet_node({WantedAlias,HostId},ClusterId,DeploymentId)->
 	   end,
     Result.
 %		   case sd:call(etcd,db_kubelet,create,[PodId,HostId,ClusterId,Node,Dir,Node,Cookie,[]],5*1000) of
-		       
+
 %% --------------------------------------------------------------------
 %% Function:start/0 
 %% Description: Initiate the eunit tests, set upp needed processes etc

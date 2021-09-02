@@ -1,0 +1,16 @@
+{{2021,9,2},
+ {20,49,49},
+ 'cluster_varmdoe@joq62-X550CA',log,"Successful starting of server",
+ [kubelet_server]}.
+{{2021,9,2},
+ {20,49,49},
+ 'cluster_varmdoe@joq62-X550CA',log,"Start init",
+ [init,cluster_server,61]}.
+{{2021,9,2},
+ {20,49,49},
+ 'cluster_varmdoe@joq62-X550CA',log,"STARTED SERVER",
+ ['cluster_varmdoe@joq62-X550CA',init,cluster_server,74]}.
+{{2021,9,2},
+ {20,49,49},
+ 'cluster_varmdoe@joq62-X550CA',log,"START ",
+ [cluster_status_interval,cluster_server,181]}.

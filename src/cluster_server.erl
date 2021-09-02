@@ -25,7 +25,7 @@
 %% --------------------------------------------------------------------
 %% Definitions 
 %-define(WantedStateInterval,60*1000).
--define(ClusterStatusInterval,1*60*1000).
+-define(ClusterStatusInterval,1*30*1000).
 %% --------------------------------------------------------------------
 
 
