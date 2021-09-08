@@ -69,6 +69,17 @@ start()->
 %% Description: Initiate the eunit tests, set upp needed processes etc
 %% Returns: non
 %% --------------------------------------------------------------------
+pass_0()->
+    
+    
+
+    ok.
+
+%% --------------------------------------------------------------------
+%% Function:start/0 
+%% Description: Initiate the eunit tests, set upp needed processes etc
+%% Returns: non
+%% --------------------------------------------------------------------
 pod_0()->
     
     ok.
@@ -81,15 +92,6 @@ pod_0()->
 
 
 
-%% --------------------------------------------------------------------
-%% Function:start/0 
-%% Description: Initiate the eunit tests, set upp needed processes etc
-%% Returns: non
-%% --------------------------------------------------------------------
-pass_0()->
-   
-
-    ok.
 
 %% --------------------------------------------------------------------
 %% Function:start/0 

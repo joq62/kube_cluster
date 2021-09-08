@@ -56,29 +56,29 @@ status_all_hosts()->
    % io:format("AllHosts = ~p~n",[{?MODULE,?LINE,AllHosts}]),
     Status=mapreduce:start(F1,F2,[],AllHosts),
   %  io:format("Status = ~p~n",[{?MODULE,?LINE,Status}]),
-    Running=[{Alias,HostId}||{running,Alias,HostId,_Ip,_Port}<-Status],
-    Missing=[{Alias,HostId}||{missing,Alias,HostId,_Ip,_Port}<-Status],
+    Running=[HostId||{running,HostId,_Ip,_Port}<-Status],
+    Missing=[HostId||{missing,HostId,_Ip,_Port}<-Status],
     {ok,Running,Missing}.
 
-get_hostname(Parent,{Alias,HostId,IpAddr,Port,User,PassWd})->    
+get_hostname(Parent,{HostId,IpAddr,Port,User,PassWd})->    
    % io:format("get_hostname= ~p~n",[{?MODULE,?LINE,HostId,User,PassWd,IpAddr,Port}]),
     Msg="hostname",
     Result=rpc:call(node(),my_ssh,ssh_send,[IpAddr,Port,User,PassWd,Msg, 5*1000],4*1000),
   %  io:format("Result, HostId= ~p~n",[{?MODULE,?LINE,Result,HostId}]),
-    Parent!{machine_status,{Alias,HostId,IpAddr,Port,Result}}.
+    Parent!{machine_status,{HostId,IpAddr,Port,Result}}.
 
 check_host_status(machine_status,Vals,_)->
     check_host_status(Vals,[]).
 
 check_host_status([],Status)->
     Status;
-check_host_status([{Alias,HostId,IpAddr,Port,[HostId]}|T],Acc)->
-    NewAcc=[{running,Alias,HostId,IpAddr,Port}|Acc],
+check_host_status([{HostId,IpAddr,Port,[HostId]}|T],Acc)->
+    NewAcc=[{running,HostId,IpAddr,Port}|Acc],
     check_host_status(T,NewAcc);
-check_host_status([{Alias,HostId,IpAddr,Port,{error,_Err}}|T],Acc) ->
-    check_host_status(T,[{missing,Alias,HostId,IpAddr,Port}|Acc]);
-check_host_status([{Alias,HostId,IpAddr,Port,{badrpc,timeout}}|T],Acc) ->
-    check_host_status(T,[{missing,Alias,HostId,IpAddr,Port}|Acc]);
+check_host_status([{HostId,IpAddr,Port,{error,_Err}}|T],Acc) ->
+    check_host_status(T,[{missing,HostId,IpAddr,Port}|Acc]);
+check_host_status([{HostId,IpAddr,Port,{badrpc,timeout}}|T],Acc) ->
+    check_host_status(T,[{missing,HostId,IpAddr,Port}|Acc]);
 check_host_status([X|T],Acc) ->
     check_host_status(T,[{x,X}|Acc]).
 
@@ -96,7 +96,7 @@ read_status(all)->
 
 read_status(XHostId) ->
     AllServers=if_db:server_read_all(),
-    [ServersStatus]=[Status||{_Alias,HostId,_User,_PassWd,_IpAddr,_Port,Status}<-AllServers,
+    [ServersStatus]=[Status||{HostId,_User,_PassWd,_IpAddr,_Port,Status}<-AllServers,
 		     XHostId==HostId],
     ServersStatus.
 					

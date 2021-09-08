@@ -43,20 +43,21 @@
 %% Returns: non
 %% --------------------------------------------------------------------
 strive_desired_state()->
-    ClusterId=sd:call(etcd,db_cluster_info,cluster,[],5*1000),
-    Result= case find_nodes_wo_kubelet_loaded() of
+    ClusterId=rpc:call(node(),db_cluster_info,cluster,[],5*1000),
+    Result= case find_nodes_wo_cluster_loaded() of
 		 {error,Reason}->
 		    {error,Reason};
-		{ok,FindNodeWOKubeletLoaded,RunningHosts,MissingHosts}->
-		    ?PrintLog(debug,"",[FindNodeWOKubeletLoaded,RunningHosts,MissingHosts,?FUNCTION_NAME,?MODULE,?LINE]), 
-		 %   case strive_desired_state(ClusterId,FindNodeWOKubeletLoaded) of
-		    case FindNodeWOKubeletLoaded of
+		{ok,FindNodeWOClusterLoaded,RunningHosts,MissingHosts}->
+		    ?PrintLog(debug,"",[FindNodeWOClusterLoaded,RunningHosts,MissingHosts,?FUNCTION_NAME,?MODULE,?LINE]), 
+		 %   case strive_desired_state(ClusterId,FindNodeWOClusterLoaded) of
+		    case FindNodeWOClusterLoaded of
 			{error,Reason}->
 			    {error,[Reason,?FUNCTION_NAME,?MODULE,?LINE]};
-			FindNodeWOKubeletLoaded->
+			FindNodeWOClusterLoaded->
 			    DeploymentSpecName="node",
-			    StartKubeletNodesInfo=start_kubelet_nodes(FindNodeWOKubeletLoaded,ClusterId,DeploymentSpecName),
-			    case StartKubeletNodesInfo of
+			   % StartClusterNodesInfo=start_cluster_nodes(FindNodeWOClusterLoaded,ClusterId,DeploymentSpecName),
+			    StartClusterNodesInfo={ok,[]},
+			    case StartClusterNodesInfo of
 				{error,Reason}->
 				    {error,Reason};
 				{ok,StartInfo}->
@@ -73,7 +74,7 @@ strive_desired_state()->
 examine_state([],_RunningHosts,[])->
     {ok,{"In desired state",[]}};
 examine_state(StartInfo,_RunningHosts,[])->
-    {error,{"Starting found hosts without kubelet",[StartInfo]}};
+    {error,{"Starting found hosts without cluster",[StartInfo]}};
 examine_state([],_RunningHosts,MissingHosts)->
     {error,{"Missing hosts",[MissingHosts]}};
 examine_state(StartInfo,_RunningHosts,MissingHosts)->
@@ -82,34 +83,34 @@ examine_state(StartInfo,_RunningHosts,MissingHosts)->
 %    {error,{unmatched,[StartInfo,RunningHosts,MissingHosts]}}.
 
 		
-find_nodes_wo_kubelet_loaded()->
+find_nodes_wo_cluster_loaded()->
     Result=case rpc:call(node(),host,status_all_hosts,[],20*1000) of
 	       {badrpc,Reason}->
 		   {error,[badrpc,Reason,?FUNCTION_NAME,?MODULE,?LINE]};
 	       {error,Reason}->
 		   {error,[Reason,?FUNCTION_NAME,?MODULE,?LINE]};
 	       {ok,RunningHosts,MissingHosts}-> 
-		   HostsWithKubelete=get_nodes_with_kubelet_runing(),
-		   FindNodeWOKubeletLoaded=[{Alias,HostId}||{Alias,HostId}<-RunningHosts,
-							   false==lists:keymember(HostId,2,HostsWithKubelete)], 
-		   {ok,FindNodeWOKubeletLoaded,RunningHosts,MissingHosts}
+		   HostsWithClustere=get_nodes_with_cluster_runing(),
+		   FindNodeWOClusterLoaded=[{Alias,HostId}||{Alias,HostId}<-RunningHosts,
+							   false==lists:keymember(HostId,2,HostsWithClustere)], 
+		   {ok,FindNodeWOClusterLoaded,RunningHosts,MissingHosts}
 	   end,
     Result.
-get_nodes_with_kubelet_runing()->   
+get_nodes_with_cluster_runing()->   
     
-    KubeletePing=[rpc:call(Node,kubelet,ping,[],2*1000)||Node<-[node()|nodes()]],
-    X=[{KubeletNode,rpc:call(KubeletNode,inet,gethostname,[],5*1000)}||{pong,KubeletNode,_}<-KubeletePing],
-    HostsWithKubelete=[{KubeletNode,HostId}||{KubeletNode,{ok,HostId}}<-X],
-    HostsWithKubelete.
+    ClusterePing=[rpc:call(Node,cluster,ping,[],2*1000)||Node<-[node()|nodes()]],
+    X=[{ClusterNode,rpc:call(ClusterNode,inet,gethostname,[],5*1000)}||{pong,ClusterNode,_}<-ClusterePing],
+    HostsWithClustere=[{ClusterNode,HostId}||{ClusterNode,{ok,HostId}}<-X],
+    HostsWithClustere.
 %% --------------------------------------------------------------------
 %% Function:start/0 
 %% Description: Initiate the eunit tests, set upp needed processes etc
 %% Returns: non
 %% --------------------------------------------------------------------
-start_kubelet_nodes(HostWithOutKubelet,ClusterId,DeploymentSpecName)->
-    F1=fun map_create_kubelet_node/2,
-    F2=fun check_kubelet_node_start/3,
-    StartList=[{HostInfo,ClusterId,DeploymentSpecName}||HostInfo<-HostWithOutKubelet],
+start_cluster_nodes(HostWithOutCluster,ClusterId,DeploymentSpecName)->
+    F1=fun map_create_cluster_node/2,
+    F2=fun check_cluster_node_start/3,
+    StartList=[{HostInfo,ClusterId,DeploymentSpecName}||HostInfo<-HostWithOutCluster],
     StartResult=mapreduce:start(F1,F2,[],StartList),
     Result=case [{error,Reason}||{error,Reason}<-StartResult] of
 	       []->
@@ -119,24 +120,25 @@ start_kubelet_nodes(HostWithOutKubelet,ClusterId,DeploymentSpecName)->
 	   end,
     Result.
 
-map_create_kubelet_node(Parent,{HostInfo,ClusterId,DeploymentSpecName})->
-    Parent!{create_kubelet_node,start_kubelet_node(HostInfo,ClusterId,DeploymentSpecName)}.
+map_create_cluster_node(Parent,{HostInfo,ClusterId,DeploymentSpecName})->
+    Parent!{create_cluster_node,start_cluster_node(HostInfo,ClusterId,DeploymentSpecName)}.
 
 
-check_kubelet_node_start(create_kubelet_node,Vals,_)->
-    check_kubelet_node_start(Vals,[]).
-check_kubelet_node_start([],StartResult)->
+check_cluster_node_start(create_cluster_node,Vals,_)->
+    check_cluster_node_start(Vals,[]).
+check_cluster_node_start([],StartResult)->
     StartResult;
-check_kubelet_node_start([StartResult|T],Acc) ->
-    check_kubelet_node_start(T,[StartResult|Acc]).
+check_cluster_node_start([StartResult|T],Acc) ->
+    check_cluster_node_start(T,[StartResult|Acc]).
  
-start_kubelet_node({WantedAlias,HostId},ClusterId,DeploymentId)->
- %   DeploymentId="kubelet",
-    DeploymentVsn=sd:call(etcd,db_deployment_spec,vsn,[DeploymentId],5*1000),
-    Cookie=sd:call(etcd,db_cluster_spec,cookie,[ClusterId],5*1000),
-    NodeName="kubelet"++"_"++ClusterId++"_"++HostId,
+start_cluster_node(HostId,ClusterId,DeploymentId)->
+ %   DeploymentId="cluster",
+    DeploymentVsn=rpc:call(node(),db_deployment_spec,vsn,[DeploymentId],5*1000),
+    Cookie=rpc:call(node(),db_cluster_spec,cookie,[ClusterId],5*1000),
+    NodeName="cluster"++"_"++ClusterId++"_"++HostId,
     Dir=NodeName++".deployment",  
-    Result=case kubelet:create_vm_ssh(WantedAlias,NodeName,Dir,Cookie) of
+    {Ip,SshPort,UId,Pwd}=rpc:call(node(),db_host_info,ssh_info,[HostId],5*1000),
+    Result=case vm_handler:create_vm({HostId,Ip,SshPort,UId,Pwd},NodeName,Dir,Cookie) of
 	       {error,Reason}->
 		   ?PrintLog(ticket,"error",[Reason,?FUNCTION_NAME,?MODULE,?LINE]),
 		   {error,Reason};
@@ -144,8 +146,8 @@ start_kubelet_node({WantedAlias,HostId},ClusterId,DeploymentId)->
 		   ?PrintLog(ticket,"badrpc",[Reason,?FUNCTION_NAME,?MODULE,?LINE]),
 		    {error,[badrpc,Reason]};
 	       {ok,Node}->
-		   Apps=["support","kubelet"],
-		   LoadStart=[{kubelet:load_start_app(Node,AppId,Dir),AppId}||AppId<-Apps],
+		   LoadStart=start_cluster_node([support],Node,Dir,[]),
+		      
 		   ?PrintLog(debug,"LoadStart",[LoadStart,?FUNCTION_NAME,?MODULE,?LINE]),
 		   case [{error,Reason}||{error,Reason}<-LoadStart] of
 		       []->
@@ -162,7 +164,11 @@ start_kubelet_node({WantedAlias,HostId},ClusterId,DeploymentId)->
 		   end
 	   end,
     Result.
-%		   case sd:call(etcd,db_kubelet,create,[PodId,HostId,ClusterId,Node,Dir,Node,Cookie,[]],5*1000) of
+%		   case sd:call(etcd,db_cluster,create,[PodId,HostId,ClusterId,Node,Dir,Node,Cookie,[]],5*1000) of
+start_cluster_node([],_,_,LoadStart)->
+    LoadStart;
+start_cluster_node([App|T],Node,Dir,Acc)->
+    ok.
 
 %% --------------------------------------------------------------------
 %% Function:start/0 
@@ -209,7 +215,7 @@ load_start(Pod,Container,Dir)->
 		   ?PrintLog(ticket,"error",[Reason,?FUNCTION_NAME,?MODULE,?LINE]),
 		   {error,Reason};
 	       ok->
-		   case sd:call(etcd,db_kubelet,add_container,[Pod,Container],5*1000) of
+		   case sd:call(etcd,db_cluster,add_container,[Pod,Container],5*1000) of
 		       {atomic,ok}->			   
 			   ok;
 		       Reason->
@@ -230,7 +236,7 @@ stop_unload(Pod,Container,Dir)->
 		   {error,[Reason,Pod,Container,Dir,?FUNCTION_NAME,?MODULE,?LINE]};
    
 	       ok->
-		   case sd:call(etcd,db_kubelet,delete_container,[Pod,Container],5*1000) of
+		   case sd:call(etcd,db_cluster,delete_container,[Pod,Container],5*1000) of
 		       {atomic,ok}->
 			   ok;
 		       Reason->

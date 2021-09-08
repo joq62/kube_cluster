@@ -68,12 +68,8 @@ setup()->
     Env=[{cluster_id,ClusterId},{monitor_node,MonitorNodeName},
 	 {cookie,Cookie}],
     ok=application:set_env([{support,Env},
-			    {kubelet,Env},
-			    {etcd,Env},
 			    {cluster,Env}]),
     ok=application:start(support),
-    ok=application:start(etcd),
-    ok=application:start(kubelet),
     io:format("~p~n",[{application:start(cluster),?MODULE,?LINE}]),
   %  ok=application:start(cluster),
 
